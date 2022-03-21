@@ -1,3 +1,6 @@
+# NOTE: DOCKER and AWS CLI must be installed (and configured, if needed)
+# NOTE: All the commands below are tested on a Linux-based OS
+
 ENV="morpher"
 REGION="eu-west-1"
 DNS="michelefacco.com"
