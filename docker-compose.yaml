@@ -1,0 +1,31 @@
+services:
+    db:
+        image: 'postgres:14'
+        environment:
+            POSTGRES_USER: 'dbuser'
+            POSTGRES_PASSWORD: 'Dev.1234'
+            POSTGRES_DB: 'morphdb'
+
+    api:
+        build:
+            context: backend
+        ports: [ '9002:8080' ]
+        links: [ 'db' ]
+        depends_on: [ 'db' ]
+        environment:
+            PG_USER: 'dbuser'
+            PG_PASSWORD: 'Dev.1234'
+            PG_DATABASE: 'morphdb'
+            PG_HOST: 'db'
+            PG_PORT: 5432
+            FE_HOST: 'localhost'
+            FE_PORT: 9001
+
+    app:
+        build:
+            context: frontend
+        ports: [ '9001:8080' ]
+        links: [ 'api' ]
+        environment:
+            VUE_APP_BE_HOST: 'localhost'
+            VUE_APP_BE_PORT: 9002

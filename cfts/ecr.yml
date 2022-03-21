@@ -1,0 +1,21 @@
+Resources:
+    RepoFront:
+        Type: AWS::ECR::Repository
+        Properties:
+            RepositoryName: !Sub '${AWS::AccountId}-morph-frontend'
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    RepoBack:
+        Type: AWS::ECR::Repository
+        Properties:
+            RepositoryName: !Sub '${AWS::AccountId}-morph-backend'
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+              
+Outputs:
+    ecrfront:
+        Value: !GetAtt RepoFront.RepositoryUri
+    ecrback:
+        Value: !GetAtt RepoBack.RepositoryUri

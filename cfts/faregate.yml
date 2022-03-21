@@ -1,0 +1,293 @@
+Parameters:
+    ECRFront:
+        Type: String
+        Description: 'Output for the frontend repository from the ECR stack'
+    ECRBack:
+        Type: String
+        Description: 'Output for the backend repository from the ECR stack'
+    PGUser:
+        Type: String
+        Description: 'Postgres User'
+        Default: 'dbuser'
+    PGPassword:
+        Type: String
+        Description: 'Postgres Password'
+        Default: 'Dev.1234'
+        NoEcho: true
+    PGDatabase:
+        Type: String
+        Description: 'Postgres Database'
+        Default: 'morphdb'
+    ListeningPort:
+        Type: Number
+        Description: 'Application Listening Port'
+        Default: 8080
+    DomainName:
+        Type: String
+        Description: 'Application Base Domain Name'
+    CidrBlock:
+        Type: String
+        Description: 'VPC Cidr Block'
+        Default: '192.168.100.0/24'
+       
+Resources:
+    ###
+    ### Networking
+    ###
+    VPC:
+        Type: AWS::EC2::VPC
+        Properties:
+            CidrBlock: !Ref CidrBlock
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    IG:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    AttachIG:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            VpcId: !Ref VPC
+            InternetGatewayId: !Ref IG
+    PublicSubnet1:
+        Type: AWS::EC2::Subnet
+        Properties:
+            MapPublicIpOnLaunch: true
+            AvailabilityZone: !Select [0, !GetAZs '']
+            CidrBlock: !Select [0, !Cidr [!Ref CidrBlock, 4, 6]]
+            VpcId: !Ref VPC
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    PublicSubnet2:
+        Type: AWS::EC2::Subnet
+        Properties:
+            MapPublicIpOnLaunch: true
+            AvailabilityZone: !Select [1, !GetAZs '']
+            CidrBlock: !Select [1, !Cidr [!Ref CidrBlock, 4, 6]]
+            VpcId: !Ref VPC
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    PublicRT:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId: !Ref VPC
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    DefaultRoute:
+        Type: AWS::EC2::Route
+        Properties:
+            DestinationCidrBlock: '0.0.0.0/0'
+            RouteTableId: !Ref PublicRT
+            GatewayId: !Ref IG
+    PubRTA1:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId: !Ref PublicSubnet1
+            RouteTableId: !Ref PublicRT
+    PubRTA2:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId: !Ref PublicSubnet2
+            RouteTableId: !Ref PublicRT
+    ApplicationSg:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: 'Application Security Group'
+            VpcId: !Ref VPC
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+            SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 8080
+              ToPort: 8080
+              CidrIp: '0.0.0.0/0'
+              Description: 'Allows Application port to everyone'
+            - IpProtocol: tcp
+              FromPort: 5432
+              ToPort: 5432
+              CidrIp: !Ref CidrBlock
+              Description: 'Allows RDS port'
+    
+    ###
+    ### Database
+    ###   
+    RdsSubnetGroup:
+        Type: AWS::RDS::DBSubnetGroup
+        Properties:
+            DBSubnetGroupDescription: 'morph-rds-subnet'
+            SubnetIds:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+    RdsInstance:
+        Type: AWS::RDS::DBInstance
+        DeletionPolicy: Delete
+        Properties:
+            DBInstanceClass: db.t4g.micro
+            Engine: postgres
+            DBSubnetGroupName: !Ref RdsSubnetGroup
+            DBName: !Ref PGDatabase
+            PubliclyAccessible: false
+            AllocatedStorage: 20
+            MasterUsername: !Ref PGUser
+            MasterUserPassword: !Ref PGPassword
+            VPCSecurityGroups:
+            - !Ref ApplicationSg
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+    
+    ###
+    ### Application
+    ###
+    Cluster:
+        Type: AWS::ECS::Cluster
+        Properties:
+            ClusterName: 'morph-cluster'
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+
+    FaregateServiceBE:
+        Type: AWS::ECS::Service
+        Properties: 
+            Cluster: !Ref Cluster
+            DesiredCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups: 
+                    - !Ref ApplicationSg
+                    Subnets: 
+                    - !Ref PublicSubnet1
+                    - !Ref PublicSubnet2
+            PropagateTags: TASK_DEFINITION
+            ServiceName: 'morph-service-be'
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+            TaskDefinition: !Ref TaskBE
+    
+    FaregateServiceFE:
+        Type: AWS::ECS::Service
+        Properties: 
+            Cluster: !Ref Cluster
+            DesiredCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    AssignPublicIp: ENABLED
+                    SecurityGroups: 
+                    - !Ref ApplicationSg
+                    Subnets: 
+                    - !Ref PublicSubnet1
+                    - !Ref PublicSubnet2
+            PropagateTags: TASK_DEFINITION
+            ServiceName: 'morph-service-fe'
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+            TaskDefinition: !Ref TaskFE
+              
+    TaskRole:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                - Effect: Allow
+                  Principal:
+                    Service: 'ecs-tasks.amazonaws.com'
+                  Action: 'sts:AssumeRole'
+            Path: /
+            ManagedPolicyArns:
+            - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+            RoleName: 'morph-test-task-role'
+    TaskLogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties: 
+            LogGroupName: '/aws/fargatelogs/morph-test'
+            RetentionInDays: 60  
+    TaskBE:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            ContainerDefinitions:
+            - Name: 'morphback'
+              Image: !Ref ECRBack
+              PortMappings:
+              - ContainerPort: !Ref ListeningPort
+                HostPort : !Ref ListeningPort
+              LogConfiguration:
+                LogDriver: awslogs
+                Options:
+                    awslogs-region: !Ref AWS::Region
+                    awslogs-group: !Ref TaskLogGroup
+                    awslogs-stream-prefix: 'morphback'
+              Environment:
+              - Name: 'PG_USER'
+                Value: !Ref PGUser
+              - Name: 'PG_PASSWORD'
+                Value: !Ref PGPassword
+              - Name: 'PG_DATABASE'
+                Value: !Ref PGDatabase
+              - Name: 'PG_HOST'
+                Value: !GetAtt RdsInstance.Endpoint.Address
+              - Name: 'PG_PORT'
+                Value: 5432
+              - Name: 'FE_HOST'
+                Value: !Sub 'app.${DomainName}'
+              - Name: 'FE_PORT'
+                Value: !Ref ListeningPort
+            Cpu: 256
+            ExecutionRoleArn: !GetAtt TaskRole.Arn
+            TaskRoleArn: !GetAtt TaskRole.Arn
+            Family: 'morph-app-be'
+            Memory: 512
+            NetworkMode: awsvpc
+            RuntimePlatform:
+                CpuArchitecture: X86_64
+                OperatingSystemFamily: LINUX
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+              
+    TaskFE:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            ContainerDefinitions:
+            - Name: 'morphfront'
+              Image: !Ref ECRFront
+              PortMappings:
+              - ContainerPort: 8080
+                HostPort : !Ref ListeningPort
+              LogConfiguration:
+                LogDriver: awslogs
+                Options:
+                    awslogs-region: !Ref AWS::Region
+                    awslogs-group: !Ref TaskLogGroup
+                    awslogs-stream-prefix: 'morphfront'
+              Environment:
+              - Name: 'VUE_APP_BE_HOST'
+                Value: !Sub 'api.${DomainName}'
+              - Name: 'VUE_APP_BE_PORT'
+                Value: !Ref ListeningPort
+            Cpu: 256
+            ExecutionRoleArn: !GetAtt TaskRole.Arn
+            TaskRoleArn: !GetAtt TaskRole.Arn
+            Family: 'morph-app-fe'
+            Memory: 512
+            NetworkMode: awsvpc
+            RuntimePlatform:
+                CpuArchitecture: X86_64
+                OperatingSystemFamily: LINUX
+            Tags:
+            - Key: 'env'
+              Value: 'morph-test'
+              
